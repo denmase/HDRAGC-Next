@@ -64,7 +64,7 @@ static AVS_Clip* apply_hdragc_ex2(AVS_Clip* src, float strength, float protect,
     a[23] = avs_new_value_int(out_bits ? atoi(out_bits) : 0);
     a[24] = avs_new_value_string(dither ? dither : "none");
     a[25] = avs_new_value_string("none");
-    a[26] = avs_new_value_bool(0);
+    a[26] = avs_new_value_float(0.0f);  // natural (slot ex-debug)
     AVS_Value v = invoke_named("HDRAGCNext", a, 27, nm);
     return avs_take_clip(v, env);
 }
@@ -168,7 +168,7 @@ static AVS_Clip* apply_m6(AVS_Clip* src, float strength, float sat, int auto_sat
     a[18]=avs_new_value_int(4); a[19]=avs_new_value_float(1.0f); a[20]=avs_new_value_float(0.35f);
     a[21]=avs_new_value_float(2.0f); a[22]=avs_new_value_int(-1);
     a[23]=avs_new_value_int(0); a[24]=avs_new_value_string("none"); a[25]=avs_new_value_string("none");
-    a[26]=avs_new_value_bool(0);
+    a[26]=avs_new_value_float(0.0f);
     AVS_Value v = invoke_named("HDRAGCNext", a, 27, nm);
     return avs_take_clip(v, env);
 }
@@ -186,7 +186,7 @@ static AVS_Clip* apply_show(AVS_Clip* src, const char* show)
     a[18]=avs_new_value_int(4); a[19]=avs_new_value_float(1.0f); a[20]=avs_new_value_float(0.35f);
     a[21]=avs_new_value_float(2.0f); a[22]=avs_new_value_int(-1);
     a[23]=avs_new_value_int(0); a[24]=avs_new_value_string("none"); a[25]=avs_new_value_string(show);
-    a[26]=avs_new_value_bool(0);
+    a[26]=avs_new_value_float(0.0f);
     AVS_Value v = invoke_named("HDRAGCNext", a, 27, nm);
     return avs_take_clip(v, env);
 }
@@ -195,7 +195,7 @@ static AVS_Clip* apply_show(AVS_Clip* src, const char* show)
 // varian C "recovery": knob dinaikkan utk konten setengah-gelap (landscape)
 static AVS_Clip* apply_C(AVS_Clip* src)
 {
-    AVS_Value a[27]; const char* nm[27] = {0};
+    AVS_Value a[28]; const char* nm[28] = { 0,"strength","protect_highlights","black_point","white_point","auto_points","temporal","temporal_radius","temporal_mode","scene_cut","scene_cut_low","scene_cooldown","detail_gain","saturation","auto_saturation","chroma_mode","luma_ratio_mix","chroma_softknee","levels","local_mix","shadow_threshold","mask_gamma","mask_level","output_bits","dither","show","natural","veil" };
     a[0]=avs_new_value_clip(src); a[1]=avs_new_value_float(1.0f); a[2]=avs_new_value_float(0.9f);
     a[3]=avs_new_value_float(0.0f); a[4]=avs_new_value_float(0.0f); a[5]=avs_new_value_bool(1);
     a[6]=avs_new_value_float(0.85f); a[7]=avs_new_value_int(4); a[8]=avs_new_value_string("iir");
@@ -206,8 +206,9 @@ static AVS_Clip* apply_C(AVS_Clip* src)
     a[21]=avs_new_value_float(1.2f); // mask_gamma 1.2 (bukan 2.0)
     a[22]=avs_new_value_int(-1);
     a[23]=avs_new_value_int(0); a[24]=avs_new_value_string("none"); a[25]=avs_new_value_string("none");
-    a[26]=avs_new_value_bool(0);
-    AVS_Value v = invoke_named("HDRAGCNext", a, 27, nm);
+    a[26]=avs_new_value_float(0.0f);
+    { const char* vz = getenv("VEIL"); a[27]=avs_new_value_float(vz?atof(vz):0.0f); }
+    AVS_Value v = invoke_named("HDRAGCNext", a, 28, nm);
     return avs_take_clip(v, env);
 }
 
@@ -224,7 +225,7 @@ static AVS_Clip* apply_natural(AVS_Clip* src, float natural, float strength)
     a[18]=avs_new_value_int(4); a[19]=avs_new_value_float(1.0f); a[20]=avs_new_value_float(0.0f);
     a[21]=avs_new_value_float(2.0f); a[22]=avs_new_value_int(-1);
     a[23]=avs_new_value_int(0); a[24]=avs_new_value_string("none"); a[25]=avs_new_value_string("none");
-    a[26]=avs_new_value_bool(0); a[27]=avs_new_value_float(natural);
+    a[26]=avs_new_value_float(natural); a[27]=avs_new_value_float(0.0f);
     AVS_Value v = invoke_named("HDRAGCNext", a, 28, nm);
     return avs_take_clip(v, env);
 }

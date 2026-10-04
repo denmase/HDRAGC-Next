@@ -46,6 +46,10 @@ Anti-fauxHDR (cinematic, restrained): `strength=1.0, natural=1.0` — lift cappe
 per-pixel (~13 lsb max), saturation compensation neutralized, lift concentrated in
 deepest shadows.
 
+Anti-haze (for very dark content, mean Y < 40): add `veil=0.5` — removes the
+low-frequency veil (dark channel 39 -> 18 measured) while keeping brightness.
+C API note: max 28 positional args per invoke; the template is sized to fit.
+
 ## Build (Linux)
 
 ```bash

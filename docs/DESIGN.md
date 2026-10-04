@@ -243,7 +243,8 @@ env->AddFunction(
 | `output_bits` | int | 0 | 0 = sama seperti input, atau 8/10/12/14/16 |
 | `dither` | string | `"blue"` | `"none"`, `"ordered"`, `"blue"` |
 | `show` | string | `"none"` | Debug view |
-| `natural` | float | 0.0 | Anti-fauxHDR: 0 = off, 1 = natural penuh (cap lift per-pixel, saturasi netral, mask tajam) |
+| `natural` | float | 0.0 | Anti-fauxHDR: cap lift per-pixel, saturasi netral, mask tajam |
+| `veil` | float | 0.0 | Anti-haze: buang komponen low-freq delta field (0..1); 0.5 = sweet spot |
 | `debug` | bool | false | Aktifkan log internal |
 
 ---
@@ -662,6 +663,25 @@ tiga batasan sekaligus:
 3. **Mask_gamma ditarik ke 2.5** ∝ natural — lift terkonsentrasi di shadow terdalam.
 
 Terukur pada frame wajah gelap: mean +12,4, max lift 13 lsb — restrained, tanpa haze.
+
+#### 10.5.7. Mode `veil` (anti-haze, T16-veil)
+
+Haze / faux-HDR veil = kenaikan **dark channel** (lantai gelap low-frequency),
+BUKAN turunnya kontras edge — metrik Laplacian buta terhadapnya (kesalahan
+metodologi yang pernah dilakukan pada proyek ini). Terukur pada frame taman
+sangat gelap (mean 17,8, dark channel asli 2,63): output recovery tanpa veil
+mengangkat dark channel ke 38,87 = selubung tebal. Fix: high-pass delta field
+di level base — `delta_out = delta − veil·blur(delta)` (blur via satu pass
+down/up-sample). Kurva terukur:
+
+| veil | dark channel | meanY | karakter |
+|---|---|---|---|
+| 0 | 38,87 | 59,2 | terang, selubung tebal |
+| **0,5** | **17,56** | **37,7** | **sweet spot: haze −55%, tetap terang** |
+| 0,7 | 10,10 | 29,5 | paling bersih, mulai gelap |
+
+Preset untuk konten sangat gelap: `strength=1.0, protect_highlights=0.9,
+shadow_threshold=0.45, mask_gamma=1.2, veil=0.5`.
 
 #### 10.5.5. Auto points dengan guard band (temuan konten nyata, T16)
 
@@ -2019,7 +2039,7 @@ Dengan pendekatan ini, HDRAGC-Next bisa menjadi pengganti HDRAGC lama yang jauh 
 
 ## 28. Catatan Penilaian Desain
 
-**Sebagai algoritma:** ~9/10 — 17 kelompok tes runtime PASS (T1–T15 sintetis + T16 lima foto asli + T17 natural), dengan tujuh temuan konten-nyata terdokumentasi dan ter-fix (guard band §10.5.5, anti-ring §15.7 + levels adaptif + anti-ring gated, tau default, stretch blending, gerbang aserti adaptif, mode natural §10.5.6).
+**Sebagai algoritma:** ~9/10 — 17 kelompok tes runtime PASS (T1–T15 sintetis + T16 lima foto asli + T17 natural), dengan tujuh temuan konten-nyata terdokumentasi dan ter-fix (guard band §10.5.5, anti-ring §15.7 + levels adaptif + anti-ring gated, tau default, stretch blending, gerbang aserti adaptif, mode natural §10.5.6, mode veil §10.5.7).
 
 Peningkatan dari versi awal (6,5–7/10):
 

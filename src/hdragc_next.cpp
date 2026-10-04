@@ -536,6 +536,7 @@ class HDRAGCNext : public GenericVideoFilter
     int temporal_radius_;
     int show_;
     float natural_;      // anti-fauxHDR: 0 = off, 1 = natural penuh
+    float veil_;         // anti-haze: buang komponen low-freq delta (0..1)
     float blue64_[64][64];      // tiled blue noise (void-and-cluster, M7)
     float lut_buf_[kLutSize];   // reused per frame (M7 buffer reuse)
 
@@ -547,7 +548,7 @@ public:
                float scene_cut, float scene_cut_low, int scene_cooldown,
                float saturation, bool auto_saturation, const char* chroma_mode,
                float luma_ratio_mix, float chroma_softknee, const char* show,
-               float natural,
+               float natural, float veil,
                IScriptEnvironment* env)
         : GenericVideoFilter(child), out_bits_(0), src_bits_(0), dither_(DITHER_NONE),
           strength_(strength), protect_(protect), black_(black), white_(white),
@@ -558,6 +559,7 @@ public:
                         ? CHROMA_SIMPLE : CHROMA_LUMA_RATIO),
           luma_ratio_mix_(luma_ratio_mix), chroma_softknee_(chroma_softknee),
           show_(SHOW_NONE), natural_(std::min(1.0f, std::max(0.0f, natural))),
+          veil_(std::min(1.0f, std::max(0.0f, veil))),
           analyzer_(nullptr), temporal_mode_(temporal_mode),
           temporal_radius_(temporal_radius)
     {
@@ -793,6 +795,21 @@ public:
                 return dst;
             }
 
+            // VEIL SUPPRESSION (anti-haze): delta = base - yin; buang komponen
+            // low-frequency (blur via down/up satu pass) -> dark channel tidak
+            // ikut terangkat sebagai selubung lebar; lift lokal tetap.
+            if (veil_ > 0.0f) {
+                Buffer d, dl, dh;
+                d.alloc(base.w, base.h);
+                for (size_t j = 0; j < bn; j++) d.d[j] = base.d[j] - yin_base.d[j];
+                Downsample2x(d, dl);
+                Upsample2x(dl, dh, d.w, d.h);
+                for (size_t j = 0; j < bn; j++) {
+                    float delta2 = d.d[j] - veil_ * dh.d[j];
+                    base.d[j] = std::min(1.0f, std::max(0.0f, yin_base.d[j] + delta2));
+                }
+            }
+
             // reconstruct
             Buffer cur;
             cur.alloc(base.w, base.h);
@@ -893,7 +910,8 @@ static AVSValue __cdecl Create_HDRAGCNext(AVSValue args, void*, IScriptEnvironme
                           (float)args[16].AsFloat(0.7),  // luma_ratio_mix
                           (float)args[17].AsFloat(0.9),  // chroma_softknee
                           args[25].AsString("none"),     // show
-                          (float)args[27].AsFloat(0.0),    // natural
+                          (float)args[26].AsFloat(0.0),    // natural
+                          (float)args[27].AsFloat(0.0),    // veil
                           env);
 }
 
@@ -909,7 +927,7 @@ static const char* hdragc_init(IScriptEnvironment* env, const AVS_Linkage* linka
         "[detail_gain]f[saturation]f[auto_saturation]b"
         "[chroma_mode]s[luma_ratio_mix]f[chroma_softknee]f"
         "[levels]i[local_mix]f[shadow_threshold]f[mask_gamma]f[mask_level]i"
-        "[output_bits]i[dither]s[show]s[debug]b[natural]f",
+        "[output_bits]i[dither]s[show]s[natural]f[veil]f",
         Create_HDRAGCNext, nullptr);
     return "HDRAGCNext: adaptive shadow brightening / local tone mapping (M3)";
 }
