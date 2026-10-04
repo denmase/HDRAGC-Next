@@ -168,12 +168,13 @@ static LumaStats ComputeLumaStats(const PVideoFrame& f, int sbits)
 // ---- Temporal analyzer (Milestone 5, design doc SS11-13) ----
 struct RawParams {
     float black, white, tau;     // effective raw params this frame (auto or fixed)
+    int dark;                    // konten gelap (p50<0.25) -> mask_gamma efektif 1.2
     float p[5];                  // percentiles p01,p25,p50,p75,p99 (normalized)
     float contrast;              // p95-p05
     float score;                 // scene cut score vs previous frame (v2)
 };
 
-struct FrameState { float black, white, tau; };
+struct FrameState { float black, white, tau; int dark; };
 
 static float SceneScoreV2(const RawParams& a, const RawParams& b)
 {
@@ -217,7 +218,7 @@ public:
         if (it != state_cache_.end()) return it->second;
 
         if (mode_ == 1) { // window: deterministic average, no state
-            FrameState acc { 0, 0, 0 };
+            FrameState acc { 0, 0, 0, 0 };
             int cnt = 0;
             for (int k = n - radius_; k <= n + radius_; k++) {
                 if (k < 0 || k >= child_->GetVideoInfo().num_frames) continue;
@@ -226,7 +227,7 @@ public:
                 cnt++;
             }
             if (cnt == 0) cnt = 1;
-            FrameState s { acc.black / cnt, acc.white / cnt, acc.tau / cnt };
+            FrameState s { acc.black / cnt, acc.white / cnt, acc.tau / cnt, 0 };
             state_cache_[n] = s;
             return s;
         }
@@ -240,7 +241,7 @@ public:
         const int max_gap = radius_ * 2;
         if (m < 0 || n - m > max_gap) {   // init / reset after seek gap (SS13.2)
             RawParams r = GetRaw(n, env);
-            FrameState s { r.black, r.white, r.tau };
+            FrameState s { r.black, r.white, r.tau, r.dark };
             state_cache_[n] = s;
             cooldown_ = cooldown_init_; suspect_ = 0;
             return s;
@@ -257,11 +258,11 @@ public:
             FrameState cur;
             if (cooldown_ > 0) cooldown_--;
             if (r.score >= scene_cut_) {                    // confirmed cut
-                cur = FrameState{ r.black, r.white, r.tau };
+                cur = FrameState{ r.black, r.white, r.tau, r.dark };
                 cooldown_ = cooldown_init_; suspect_ = 0;
             } else if (r.score >= scene_cut_low_) {         // suspicious
                 if (suspect_) {                             // 2 consecutive -> cut
-                    cur = FrameState{ r.black, r.white, r.tau };
+                    cur = FrameState{ r.black, r.white, r.tau, r.dark };
                     cooldown_ = cooldown_init_; suspect_ = 0;
                 } else {                                    // spike: faster adapt, NO reset
                     suspect_ = 1;
@@ -325,8 +326,10 @@ private:
         r.black = auto_points_ ? bb : fixed_black_;
         r.white = auto_points_ ? ww : fixed_white_;
         r.contrast = pct(0.95) - pct(0.05);
+        r.dark = (r.p[2] < 0.25f) ? 1 : 0;
         r.tau = (shadow_thr_ > 0.f) ? shadow_thr_
-                                    : std::min(0.45f, std::max(0.20f, r.p[2]));
+                                    : (r.dark ? 0.45f
+                                              : std::min(0.45f, std::max(0.20f, r.p[2])));
         r.score = 0.f;
         raw_cache_[n] = r;
         return r;
@@ -532,6 +535,7 @@ class HDRAGCNext : public GenericVideoFilter
     int temporal_mode_;
     int temporal_radius_;
     int show_;
+    float natural_;      // anti-fauxHDR: 0 = off, 1 = natural penuh
     float blue64_[64][64];      // tiled blue noise (void-and-cluster, M7)
     float lut_buf_[kLutSize];   // reused per frame (M7 buffer reuse)
 
@@ -543,6 +547,7 @@ public:
                float scene_cut, float scene_cut_low, int scene_cooldown,
                float saturation, bool auto_saturation, const char* chroma_mode,
                float luma_ratio_mix, float chroma_softknee, const char* show,
+               float natural,
                IScriptEnvironment* env)
         : GenericVideoFilter(child), out_bits_(0), src_bits_(0), dither_(DITHER_NONE),
           strength_(strength), protect_(protect), black_(black), white_(white),
@@ -552,7 +557,7 @@ public:
           chroma_mode_(!strcmp(chroma_mode ? chroma_mode : "luma_ratio", "simple")
                         ? CHROMA_SIMPLE : CHROMA_LUMA_RATIO),
           luma_ratio_mix_(luma_ratio_mix), chroma_softknee_(chroma_softknee),
-          show_(SHOW_NONE),
+          show_(SHOW_NONE), natural_(std::min(1.0f, std::max(0.0f, natural))),
           analyzer_(nullptr), temporal_mode_(temporal_mode),
           temporal_radius_(temporal_radius)
     {
@@ -689,7 +694,14 @@ public:
                     for (int x = 0; x < W; x++) lvl[0].d[(size_t)y*W + x] = r16[x] / smax;
                 }
             }
+            // LEVELS ADAPTIF (fix haze): base minimal ~1/8 dimensi terkecil.
+            // Frame kecil dgn levels=4 -> base 22x14 -> upsample 4x = kabut.
+            int min_dim = (W < H ? W : H);
             int want = std::min(6, std::max(2, levels_));
+            int max_levels_dim = 1;
+            while ((min_dim >> (max_levels_dim + 1)) >= 24 && max_levels_dim < 6)
+                max_levels_dim++;
+            if (want > max_levels_dim) want = max_levels_dim;
             while (L < want && lvl[L].w > 16 && lvl[L].h > 16) {
                 Downsample2x(lvl[L], lvl[L+1]);
                 L++;
@@ -705,7 +717,10 @@ public:
 
             // shadow mask dari base (level L) — SS10.5
             float tau = tau_state;
-            const float g = std::max(0.1f, mask_gamma_);
+            // konten gelap (auto) -> mask_gamma efektif 1.2 (anti haze + recovery)
+            float g = std::max(0.1f, (st.dark && mask_gamma_ > 1.2f) ? 1.2f : mask_gamma_);
+            if (natural_ > 0.0f)
+                g = g + (2.5f - g) * natural_ * 0.6f;   // konsentrasi ke shadow terdalam
             Buffer& base = lvl[L];
             const size_t bn = base.d.size();
             std::vector<float> mask_eff(bn);
@@ -787,10 +802,13 @@ public:
                 Upsample2x(cur, up, lvl[i].w, lvl[i].h);
                 for (size_t j = 0; j < up.d.size(); j++) {
                     float b = up.d[j];
-                    // anti-ring: detail melemah mendekati 0/1 (temuan frame real:
-                    // ringing lentera -> clamp 0 -> crush hitam p01 24->9)
-                    float w = 1.0f - 0.7f * fabsf(2.0f * b - 1.0f);
-                    up.d[j] += det[i].d[j] * w;
+                    // anti-ring GATED (fix haze): rolloff hanya utk detail BESAR
+                    // (edge -> potensi ringing); detail kecil (tekstur) utuh.
+                    float d = det[i].d[j];
+                    float w = 1.0f;
+                    if (fabsf(d) > 0.10f)
+                        w = 1.0f - 0.7f * fabsf(2.0f * b - 1.0f);
+                    up.d[j] += d * w;
                 }
                 cur = up;
             }
@@ -800,10 +818,17 @@ public:
             const int dpitch = dst->GetPitch(PLANAR_Y);
             const float dmax = (float)((1 << out_bits_) - 1);
             const bool dither = (dither_ != DITHER_NONE) && (out_bits_ < src_bits_);
+            // ANTI-FAUXHDR: batasi delta per-pixel terhadap ORIGINAL.
+            // natural=1 -> lift max ~0.05 (hitam tetap dalam, tidak abu-abu total).
+            const float lift_cap = 0.20f * (1.0f - 0.75f * natural_);
             for (int y = 0; y < H; y++) {
                 uint8_t* row = dp + (size_t)y * dpitch;
                 for (int x = 0; x < W; x++) {
-                    double v = (double)cur.d[(size_t)y*W + x] * (double)dmax;
+                    float o = lvl[0].d[(size_t)y*W + x];
+                    float vv = cur.d[(size_t)y*W + x];
+                    float d = vv - o;
+                    if (d > lift_cap) vv = o + lift_cap;
+                    double v = (double)vv * (double)dmax;
                     if (dither) v += (double)DitherLsb(x, y, dither_, (const float*)blue64_);
                     long iv = lrint(v);
                     if (iv < 0) iv = 0;
@@ -820,6 +845,9 @@ public:
             float g_sat = saturation_;
             if (auto_saturation_)
                 g_sat *= std::min(1.5f, std::max(0.8f, 1.0f + (1.0f - avg_after) * 0.25f));
+            // anti-fauxHDR: kompensasi saturasi dinetralkan (fauxHDR khas:
+            // shadow terangkat + warna diboost bersamaan)
+            g_sat = 1.0f + (g_sat - 1.0f) * (1.0f - natural_);
             ProcessChromaLR(src, dst, yin_base, base, cur, src_bits_, out_bits_,
                             chroma_mode_, g_sat, luma_ratio_mix_, chroma_softknee_,
                             dither_, (const float*)blue64_);
@@ -865,6 +893,7 @@ static AVSValue __cdecl Create_HDRAGCNext(AVSValue args, void*, IScriptEnvironme
                           (float)args[16].AsFloat(0.7),  // luma_ratio_mix
                           (float)args[17].AsFloat(0.9),  // chroma_softknee
                           args[25].AsString("none"),     // show
+                          (float)args[27].AsFloat(0.0),    // natural
                           env);
 }
 
@@ -880,7 +909,7 @@ static const char* hdragc_init(IScriptEnvironment* env, const AVS_Linkage* linka
         "[detail_gain]f[saturation]f[auto_saturation]b"
         "[chroma_mode]s[luma_ratio_mix]f[chroma_softknee]f"
         "[levels]i[local_mix]f[shadow_threshold]f[mask_gamma]f[mask_level]i"
-        "[output_bits]i[dither]s[show]s[debug]b",
+        "[output_bits]i[dither]s[show]s[debug]b[natural]f",
         Create_HDRAGCNext, nullptr);
     return "HDRAGCNext: adaptive shadow brightening / local tone mapping (M3)";
 }

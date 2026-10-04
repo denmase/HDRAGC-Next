@@ -243,6 +243,7 @@ env->AddFunction(
 | `output_bits` | int | 0 | 0 = sama seperti input, atau 8/10/12/14/16 |
 | `dither` | string | `"blue"` | `"none"`, `"ordered"`, `"blue"` |
 | `show` | string | `"none"` | Debug view |
+| `natural` | float | 0.0 | Anti-fauxHDR: 0 = off, 1 = natural penuh (cap lift per-pixel, saturasi netral, mask tajam) |
 | `debug` | bool | false | Aktifkan log internal |
 
 ---
@@ -647,6 +648,20 @@ tau = clamp(p50, 0.20f, 0.45f);
 - Scene terang (p50 = 0.55) → tau = 0.45 → lift hampir mati.
 
 `tau` ikut di-temporal-smooth bersama parameter lain — smoothing di level parameter, bukan mask per-pixel.
+
+#### 10.5.6. Mode `natural` (anti-fauxHDR, T17)
+
+Pseudo-HDR/faux-HDR punya tanda matematis yang dapat dibatasi: lift tak terbatas
+(hitam jadi abu-abu total), saturasi ikut dinaikkan di area yang diangkat, dan
+fluktuasi delta lokal besar (glow di sekitar objek). `natural` ∈ [0,1] menerapkan
+tiga batasan sekaligus:
+
+1. **Lift cap per-pixel** terhadap luma asli: `cap = 0.20·(1−0.75·natural)`
+   → natural=1 berarti lift maks ~0.05 (13 lsb @8bit, terukur T17).
+2. **Kompensasi saturasi dinetralkan**: `g_sat ← 1 + (g_sat−1)·(1−natural)`.
+3. **Mask_gamma ditarik ke 2.5** ∝ natural — lift terkonsentrasi di shadow terdalam.
+
+Terukur pada frame wajah gelap: mean +12,4, max lift 13 lsb — restrained, tanpa haze.
 
 #### 10.5.5. Auto points dengan guard band (temuan konten nyata, T16)
 
@@ -2004,7 +2019,7 @@ Dengan pendekatan ini, HDRAGC-Next bisa menjadi pengganti HDRAGC lama yang jauh 
 
 ## 28. Catatan Penilaian Desain
 
-**Sebagai algoritma:** ~9/10 — 16 kelompok tes runtime PASS (T1–T15 sintetis + T16 lima foto asli via raw-source: dua portrait/malam + tiga landscape underexposed), dengan lima temuan konten-nyata terdokumentasi dan ter-fix (guard band §10.5.5, anti-ring §15.7, tau default, stretch blending, gerbang aserti adaptif).
+**Sebagai algoritma:** ~9/10 — 17 kelompok tes runtime PASS (T1–T15 sintetis + T16 lima foto asli + T17 natural), dengan tujuh temuan konten-nyata terdokumentasi dan ter-fix (guard band §10.5.5, anti-ring §15.7 + levels adaptif + anti-ring gated, tau default, stretch blending, gerbang aserti adaptif, mode natural §10.5.6).
 
 Peningkatan dari versi awal (6,5–7/10):
 
@@ -2018,5 +2033,6 @@ Sisa yang masih bisa ditingkatkan di versi berikutnya:
 2. Mode `iir` tetap non-deterministik tergantung riwayat seek — trade-off yang disadari; `window` tersedia sebagai alternatif deterministic.
 3. Skala spasial masih satu tingkat (satu mask level) — multi-scale gain map bisa dieksplorasi nanti.
 4. Headroom chroma (`1.2·min(y,1−y)`) layak dijadikan parameter `chroma_headroom`; auto-percentile remap pada konten narrow-range sangat agresif (by design p01/p99 stretch) dan mendominasi clamp — perilaku yang disadari, perlu tuning konten nyata.
-5. M7 selesai dasar: `-O3 -mavx2` flags, `show` modes mask/base/lift, blue noise void-and-cluster 64x64, LUT member reuse, `SetCacheHints(CACHE_GENERIC)` (return **int**). Sisa: intrinsik AVX2 manual, downscale analisis 256x144.
+5. M7 selesai dasar: `-O3 -mavx2` flags, `show` modes, blue noise, LUT member reuse, `SetCacheHints(CACHE_GENERIC)` (return **int**). Sisa: intrinsik AVX2 manual, downscale analisis 256x144.
+6b. Fix haze (temuan visual panel wajah): levels ADAPTIF (base >= 1/8 min-dim — frame kecil tak lagi di-paksa 4 level sampai base 22px), anti-ring GATED (rolloff hanya utk |detail|>0.1; tekstur rambut/kulit utuh). Keduanya menjawab "haze makin kelihatan" pada konten asli.
 6. Raw-source input (`RawSourceYV12`) memungkinkan uji konten nyata — **bug pitch-align dan U/V swap di sanalah yang membuka tiga temuan T16**; pipeline uji end-to-end dengan konten nyata adalah komponen wajib.

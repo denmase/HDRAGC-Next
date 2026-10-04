@@ -42,6 +42,10 @@ pipeline with blue-noise dithering.
 Recovery preset for underexposed content: `strength=1.0, protect_highlights=0.9,
 shadow_threshold=0.45, mask_gamma=1.2`.
 
+Anti-fauxHDR (cinematic, restrained): `strength=1.0, natural=1.0` — lift capped
+per-pixel (~13 lsb max), saturation compensation neutralized, lift concentrated in
+deepest shadows.
+
 ## Build (Linux)
 
 ```bash

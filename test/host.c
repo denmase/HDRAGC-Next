@@ -211,6 +211,24 @@ static AVS_Clip* apply_C(AVS_Clip* src)
     return avs_take_clip(v, env);
 }
 
+
+static AVS_Clip* apply_natural(AVS_Clip* src, float natural, float strength)
+{
+    AVS_Value a[28]; const char* nm[28] = {0};
+    a[0]=avs_new_value_clip(src); a[1]=avs_new_value_float(strength); a[2]=avs_new_value_float(0.8f);
+    a[3]=avs_new_value_float(0.0f); a[4]=avs_new_value_float(0.0f); a[5]=avs_new_value_bool(1);
+    a[6]=avs_new_value_float(0.85f); a[7]=avs_new_value_int(4); a[8]=avs_new_value_string("iir");
+    a[9]=avs_new_value_float(0.35f); a[10]=avs_new_value_float(0.20f); a[11]=avs_new_value_int(3);
+    a[12]=avs_new_value_float(1.0f); a[13]=avs_new_value_float(1.0f); a[14]=avs_new_value_bool(1);
+    a[15]=avs_new_value_string("luma_ratio"); a[16]=avs_new_value_float(0.7f); a[17]=avs_new_value_float(0.9f);
+    a[18]=avs_new_value_int(4); a[19]=avs_new_value_float(1.0f); a[20]=avs_new_value_float(0.0f);
+    a[21]=avs_new_value_float(2.0f); a[22]=avs_new_value_int(-1);
+    a[23]=avs_new_value_int(0); a[24]=avs_new_value_string("none"); a[25]=avs_new_value_string("none");
+    a[26]=avs_new_value_bool(0); a[27]=avs_new_value_float(natural);
+    AVS_Value v = invoke_named("HDRAGCNext", a, 28, nm);
+    return avs_take_clip(v, env);
+}
+
 static int sample_y(AVS_Clip* c, int x, int y)
 {
     AVS_VideoFrame* f = avs_get_frame(c, 0);
@@ -614,11 +632,14 @@ int main(int argc, char** argv)
         printf("T16: skipped (no %s -- set NIGHT_YUV for real-frame proof)\n", night_yuv_path);
     } else {
         AVS_Value ra[4]; const char* rn[4] = { NULL, "width", "height", "length" };
+        const char* nw = getenv("NIGHT_W"); const char* nh = getenv("NIGHT_H");
         ra[0] = avs_new_value_string(night_yuv_path);
-        ra[1] = avs_new_value_int(612);
-        ra[2] = avs_new_value_int(408);
+        ra[1] = avs_new_value_int(nw ? atoi(nw) : 612);
+        ra[2] = avs_new_value_int(nh ? atoi(nh) : 408);
         ra[3] = avs_new_value_int(1);
         AVS_Value vr = invoke_named("RawSourceYV12", ra, 4, rn);
+        if (avs_is_error(vr)) { failures++; }
+        else {
         AVS_Clip* real = avs_take_clip(vr, env);
 
         // Varian A: auto points (p01/p99 stretch) + tau 0.35 — gaya "auto levels"
@@ -629,7 +650,8 @@ int main(int argc, char** argv)
         AVS_VideoFrame* fs = avs_get_frame(real, 0);
         AVS_VideoFrame* fda = avs_get_frame(fa, 0);
         AVS_VideoFrame* fdb = avs_get_frame(fb, 0);
-        int W = 612, H = 408;
+        const AVS_VideoInfo* rvi = avs_get_video_info(real);
+        int W = rvi->width, H = rvi->height;
         const unsigned char* ys  = avs_get_read_ptr_p(fs,  AVS_PLANAR_Y);
         const unsigned char* yda = avs_get_read_ptr_p(fda, AVS_PLANAR_Y);
         const unsigned char* ydb = avs_get_read_ptr_p(fdb, AVS_PLANAR_Y);
@@ -735,9 +757,56 @@ int main(int argc, char** argv)
         fclose(f4);
         avs_release_video_frame(fdc);
         avs_release_video_frame(fs); avs_release_video_frame(fda); avs_release_video_frame(fdb);
+        }
     }
 
-    if (failures == 0) printf("PASS: all Milestone-2..7 + REAL-FRAME checks (%s)\n", argv[1]);
+    // ---- T17: anti-fauxHDR (natural=1) pada frame wajah ----
+    if (access(night_yuv_path, F_OK) == 0) {
+        AVS_Value ra[4]; const char* rn[4] = { NULL, "width", "height", "length" };
+        const char* nw2 = getenv("NIGHT_W"); const char* nh2 = getenv("NIGHT_H");
+        ra[0] = avs_new_value_string(night_yuv_path);
+        ra[1] = avs_new_value_int(nw2 ? atoi(nw2) : 612);
+        ra[2] = avs_new_value_int(nh2 ? atoi(nh2) : 408);
+        ra[3] = avs_new_value_int(1);
+        AVS_Value vr = invoke_named("RawSourceYV12", ra, 4, rn);
+        AVS_Clip* real = avs_take_clip(vr, env);
+        AVS_Clip* fnat = apply_natural(real, 1.0f, 1.0f);
+        AVS_VideoFrame* fs2 = avs_get_frame(real, 0);
+        AVS_VideoFrame* fd2 = avs_get_frame(fnat, 0);
+        int Wn = avs_get_video_info(real)->width, Hn = avs_get_video_info(real)->height;
+        const unsigned char* ys2 = avs_get_read_ptr_p(fs2, AVS_PLANAR_Y);
+        const unsigned char* yd2 = avs_get_read_ptr_p(fd2, AVS_PLANAR_Y);
+        int ps2 = avs_get_pitch_p(fs2, AVS_PLANAR_Y), pd2 = avs_get_pitch_p(fd2, AVS_PLANAR_Y);
+        int maxd = 0; long tot2 = 0; double ms2 = 0, md2 = 0;
+        for (int y = 0; y < Hn; y++) {
+            const unsigned char* r1 = ys2 + (size_t)y*ps2;
+            const unsigned char* r2 = yd2 + (size_t)y*pd2;
+            for (int x = 0; x < Wn; x++) {
+                int dd = (int)r2[x] - (int)r1[x];
+                if (dd > maxd) maxd = dd;
+                tot2++; ms2 += r1[x]; md2 += r2[x];
+            }
+        }
+        printf("T17 natural=1: mean %.1f->%.1f, max lift %d lsb (cap ~51)\n",
+               ms2/tot2, md2/tot2, maxd);
+        CHECK(maxd <= 55, "T17: lift melebihi cap (%d)", maxd);
+        CHECK(md2/tot2 > ms2/tot2 + 1, "T17: tidak ada lift sama sekali");
+        CHECK(md2/tot2 < ms2/tot2 + 35, "T17: masih terlalu agresif utk natural=1");
+        // dump natural (Y+U+V)
+        {
+            const unsigned char* un = avs_get_read_ptr_p(fd2, AVS_PLANAR_U);
+            const unsigned char* vn = avs_get_read_ptr_p(fd2, AVS_PLANAR_V);
+            int pn = avs_get_pitch_p(fd2, AVS_PLANAR_U);
+            FILE* f5 = fopen("/tmp/proof_N.yuv", "wb");
+            for (int y = 0; y < Hn; y++) fwrite(yd2 + (size_t)y*pd2, 1, Wn, f5);
+            for (int y = 0; y < Hn/2; y++) fwrite(un + (size_t)y*pn, 1, Wn/2, f5);
+            for (int y = 0; y < Hn/2; y++) fwrite(vn + (size_t)y*pn, 1, Wn/2, f5);
+            fclose(f5);
+        }
+        avs_release_video_frame(fs2); avs_release_video_frame(fd2);
+    }
+
+    if (failures == 0) printf("PASS: all Milestone-2..7 + REAL-FRAME + NATURAL checks (%s)\n", argv[1]);
     else fprintf(stderr, "RESULT: %d failure(s)\n", failures);
     return failures ? 1 : 0;
 }
