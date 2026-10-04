@@ -1,0 +1,91 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+env:
+  AVS_VERSION: v3.7.5
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux: full pipeline — build AvsCore, build plugin, build host, RUN tests.
+  # Paths assume repo root == contents of hdragc-next/ (src/, test/, CMakeLists.txt).
+  # ---------------------------------------------------------------------------
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Fetch AviSynth+ source
+        run: |
+          curl -sL --retry 3 -o avs.tar.gz \
+            https://codeload.github.com/AviSynth/AviSynthPlus/tar.gz/refs/tags/${{ env.AVS_VERSION }}
+          mkdir -p avs
+          tar xzf avs.tar.gz -C avs --strip-components=1
+
+      - name: Cache AviSynth+ core build
+        id: cache-avs
+        uses: actions/cache@v4
+        with:
+          path: avsbuild
+          key: avs-${{ env.AVS_VERSION }}-${{ runner.os }}-${{ hashFiles('.github/workflows/build.yml') }}
+
+      - name: Build AvsCore
+        if: steps.cache-avs.outputs.cache-hit != 'true'
+        run: |
+          cmake -S avs -B avsbuild -GNinja -DCMAKE_BUILD_TYPE=Release
+          ninja -C avsbuild AvsCore
+
+      - name: Build plugin
+        run: |
+          cmake -S . -B pbuild -GNinja \
+            -DAVISYNTH_INCLUDE_DIR="$PWD/avs/avs_core/include"
+          ninja -C pbuild
+
+      - name: Build test host
+        run: |
+          gcc -O1 -o host test/host.c \
+            -I avs/avs_core/include \
+            -L avsbuild/avs_core -lavisynth -lm
+
+      - name: Run test suite (T1-T12)
+        run: LD_LIBRARY_PATH="$PWD/avsbuild/avs_core" ./host pbuild/hdragc_next.so
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hdragc-next-linux-x86_64
+          path: pbuild/hdragc_next.so
+
+  # ---------------------------------------------------------------------------
+  # Windows: build plugin DLL with MSVC against AviSynth+ headers.
+  # Runtime test skipped (requires installed AviSynth+ on the runner).
+  # ---------------------------------------------------------------------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch AviSynth+ headers
+        run: |
+          curl.exe -sL --retry 3 -o avs.tar.gz `
+            https://codeload.github.com/AviSynth/AviSynthPlus/tar.gz/refs/tags/${{ env.AVS_VERSION }}
+          mkdir avs
+          tar xzf avs.tar.gz -C avs --strip-components=1
+
+      - name: Build plugin (MSVC)
+        run: |
+          cmake -S . -B pbuild -G "Visual Studio 17 2022" -A x64 `
+            -DAVISYNTH_INCLUDE_DIR="$PWD/avs/avs_core/include"
+          cmake --build pbuild --config Release
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hdragc-next-windows-x64
+          path: pbuild/Release/hdragc_next.dll
