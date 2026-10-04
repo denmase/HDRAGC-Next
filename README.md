@@ -17,7 +17,7 @@ pipeline with blue-noise dithering.
 - **Auto points with guard band + stretch blending** — percentile stretch that
   does not crush shadows and does not re-gamma the image into haze
 - **Chroma** — luma-ratio saturation compensation, hue-preserving soft clamp
-- **Quality** — float32 internal, 8–16 bit I/O, ordered/blue-noise dithering,
+- **Quality** — float32 internal, 8-16 bit I/O, ordered/blue-noise dithering,
   ~66 fps at 640x480 (2-core, AVX2)
 - **Debug** — `show="mask"|"base"|"lift"` visualizations
 
@@ -59,7 +59,8 @@ gcc -O1 -o host test/host.c -I avs/avs_core/include -L avsbuild/avs_core -lavisy
 LD_LIBRARY_PATH=$PWD/avsbuild/avs_core ./host pbuild/hdragc_next.so
 ```
 
-Windows (MSVC): see `.github/workflows/build.yml`.
+Windows (MSVC): see `.github/workflows/build.yml` (pinned to `windows-2022`
+which carries Visual Studio 2022; `windows-latest`/2025 no longer does).
 
 ## Usage
 

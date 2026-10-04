@@ -4,6 +4,7 @@
 #include <string.h>
 #include <math.h>
 #include <time.h>
+#include <unistd.h>
 #include "avisynth_c.h"
 
 static AVS_ScriptEnvironment* env;
@@ -320,12 +321,19 @@ static void expect_convert_8to16(AVS_Clip* src8, AVS_Clip* out16, const char* la
 int main(int argc, char** argv)
 {
     setbuf(stdout, NULL);
+    const char* night_yuv_path = getenv("NIGHT_YUV");
+    if (!night_yuv_path) night_yuv_path = "/tmp/night.yuv";
     if (argc < 2) { fprintf(stderr, "usage: %s <plugin.so>\n", argv[0]); return 2; }
     env = avs_create_script_environment(AVISYNTH_INTERFACE_VERSION);
     AVS_Value a0[1] = { avs_new_value_string(argv[1]) };
     AVS_Value v = invoke_named("LoadPlugin", a0, 1, (const char*[]){ NULL });
     if (avs_is_error(v)) return 1;
-    AVS_Value a0b[1] = { avs_new_value_string("/tmp/pbuild/rawsrc.so") };
+    char rawsrc_path[1200];
+    snprintf(rawsrc_path, sizeof(rawsrc_path), "%s", argv[1]);
+    char* slashp = strrchr(rawsrc_path, '/');
+    if (slashp) strcpy(slashp + 1, "rawsrc.so");
+    else snprintf(rawsrc_path, sizeof(rawsrc_path), "rawsrc.so");
+    AVS_Value a0b[1] = { avs_new_value_string(rawsrc_path) };
     AVS_Value vrb = invoke_named("LoadPlugin", a0b, 1, (const char*[]){ NULL });
     if (avs_is_error(vrb)) return 1;
 
@@ -599,10 +607,14 @@ int main(int argc, char** argv)
         CHECK(diffcount > 100, "T15: blue == ordered?! (%ld diffs)", diffcount);
     }
 
-    // ---- T16: BUKTI pada frame REAL gelap (foto malam 612x408) ----
-    {
+    // ---- T16: BUKTI pada frame REAL gelap (foto malam) ----
+    // Lewati gracefully bila frame tidak tersedia (mis. CI tanpa foto asli):
+    // beri NIGHT_YUV=<path> atau taruh /tmp/night.yuv untuk bukti penuh.
+    if (access(night_yuv_path, F_OK) != 0) {
+        printf("T16: skipped (no %s -- set NIGHT_YUV for real-frame proof)\n", night_yuv_path);
+    } else {
         AVS_Value ra[4]; const char* rn[4] = { NULL, "width", "height", "length" };
-        ra[0] = avs_new_value_string("/tmp/night.yuv");
+        ra[0] = avs_new_value_string(night_yuv_path);
         ra[1] = avs_new_value_int(612);
         ra[2] = avs_new_value_int(408);
         ra[3] = avs_new_value_int(1);

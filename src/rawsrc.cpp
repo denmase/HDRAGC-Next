@@ -3,9 +3,15 @@
 #include <cstdio>
 #include <cstring>
 
-#if defined(__GNUC__)
-__attribute__((visibility("hidden")))
+#ifdef _MSC_VER
+  #define RAWSRC_HIDDEN
+  #define RAWSRC_EXPORT __declspec(dllexport)
+#else
+  #define RAWSRC_HIDDEN __attribute__((visibility("hidden")))
+  #define RAWSRC_EXPORT __attribute__((visibility("default")))
 #endif
+
+RAWSRC_HIDDEN
 const AVS_Linkage* AVS_linkage = nullptr;
 
 class RawSourceYV12 : public IClip
@@ -75,10 +81,10 @@ static const char* rawsrc_init(IScriptEnvironment* env, const AVS_Linkage* linka
     return "RawSourceYV12: raw YV12 reader (proof input)";
 }
 
-extern "C" __attribute__((visibility("default")))
+extern "C" RAWSRC_EXPORT
 const char* AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* linkage)
 { return rawsrc_init(env, linkage); }
 
-extern "C" __attribute__((visibility("default")))
+extern "C" RAWSRC_EXPORT
 const char* AvisynthPluginInit2(IScriptEnvironment* env)
 { return rawsrc_init(env, nullptr); }
