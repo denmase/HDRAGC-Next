@@ -67,7 +67,9 @@ jobs:
   # Runtime test skipped (requires installed AviSynth+ on the runner).
   # ---------------------------------------------------------------------------
   windows:
-    runs-on: windows-latest
+    # PIN windows-2022: windows-latest (2025) tidak membawa VS2022 lagi,
+    # generator "Visual Studio 17 2022" gagal "could not find any instance".
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
