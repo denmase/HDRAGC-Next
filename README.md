@@ -78,6 +78,14 @@ ConvertToYUV420P16()
 HDRAGCNext(strength=0.8, temporal=0.85, output_bits=8, dither="blue")
 ```
 
+## Interfaces
+
+- AviSynth+ (`hdragc_next` / `hdragcnext_avs.so` / `.dll`)
+- VapourSynth  (`core.hlgef.HDRAGCNext` / `hdragcnext_vs.so` / `.dll`)
+
+Both link the same `hdragc_core`; see docs/M1_DUAL_CORE.md and
+docs/M2_VS_ADAPTER.md.
+
 ## Repository layout
 
 ```
