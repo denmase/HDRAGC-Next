@@ -41,7 +41,7 @@ jobs:
           cmake -S avs -B avsbuild -GNinja -DCMAKE_BUILD_TYPE=Release
           ninja -C avsbuild AvsCore
 
-      - name: Build plugin (dual-interface: AVS + VS in one binary)
+      - name: Build plugin (dual-interface - AVS + VS in one binary)
         run: |
           cmake -S . -B pbuild -GNinja \
             -DAVISYNTH_INCLUDE_DIR="$PWD/avs/avs_core/include"
