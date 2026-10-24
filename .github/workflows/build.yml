@@ -10,8 +10,8 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Linux: full pipeline — build AvsCore, build plugin, build host, RUN tests.
-  # Paths assume repo root == contents of hdragc-next/ (src/, test/, CMakeLists.txt).
+  # Linux: build AvsCore, build the dual-interface plugin, run the full
+  # T1-T17 suite (incl. real-frame T16) through the C API test host.
   # ---------------------------------------------------------------------------
   linux:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
           cmake -S avs -B avsbuild -GNinja -DCMAKE_BUILD_TYPE=Release
           ninja -C avsbuild AvsCore
 
-      - name: Build plugin
+      - name: Build plugin (dual-interface: AVS + VS in one binary)
         run: |
           cmake -S . -B pbuild -GNinja \
             -DAVISYNTH_INCLUDE_DIR="$PWD/avs/avs_core/include"
@@ -53,22 +53,20 @@ jobs:
             -I avs/avs_core/include \
             -L avsbuild/avs_core -lavisynth -lm
 
-      - name: Run test suite (T1-T12)
+      - name: Run test suite (T1-T17)
         run: LD_LIBRARY_PATH="$PWD/avsbuild/avs_core" ./host pbuild/hdragc_next.so
 
-      - name: Upload plugin artifact
+      - name: Upload dual-interface artifact
         uses: actions/upload-artifact@v4
         with:
           name: hdragc-next-linux-x86_64
           path: pbuild/hdragc_next.so
 
   # ---------------------------------------------------------------------------
-  # Windows: build plugin DLL with MSVC against AviSynth+ headers.
-  # Runtime test skipped (requires installed AviSynth+ on the runner).
+  # Windows: MSVC static-runtime build; runtime smoke test of BOTH interfaces.
   # ---------------------------------------------------------------------------
   windows:
-    # PIN windows-2022: windows-latest (2025) tidak membawa VS2022 lagi,
-    # generator "Visual Studio 17 2022" gagal "could not find any instance".
+    # PIN windows-2022: windows-latest no longer ships VS2022.
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -80,13 +78,43 @@ jobs:
           mkdir avs
           tar xzf avs.tar.gz -C avs --strip-components=1
 
-      - name: Build plugin (MSVC)
+      - name: Build plugin (MSVC, static runtime, dual-interface)
         run: |
           cmake -S . -B pbuild -G "Visual Studio 17 2022" -A x64 `
             -DAVISYNTH_INCLUDE_DIR="$PWD/avs/avs_core/include"
           cmake --build pbuild --config Release
 
-      - name: Upload plugin artifact
+      - name: Verify static dependencies (no vcruntime/msvcp/libstdc++)
+        run: |
+          $dll = "pbuild/Release/hdragc_next.dll"
+          $deps = (& "$env:VSAPPIDDIR\..\..\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\dumpbin.exe" /dependents $dll) -join " "
+          if ($deps -match "vcruntime140|msvcp140|libstdc\+\+|libgcc") {
+            Write-Error "Non-static dependency found: $deps"; exit 1
+          }
+          Write-Output "Static deps OK"
+
+      - name: VapourSynth runtime smoke test
+        run: |
+          pip install vapoursynth
+          python - <<'PY'
+          import vapoursynth as vs
+          core = vs.core
+          core.std.LoadPlugin(path='pbuild/Release/hdragc_next.dll')
+          assert 'HDRAGCNext' in dir(core.hlgef)
+          for fmt in (vs.YUV420P8, vs.YUV420P16, vs.YUV444P16):
+              src = core.std.BlankClip(width=64, height=64, length=3, format=fmt)
+              pas = core.hlgef.HDRAGCNext(src, gain=0.0)
+              d = core.std.PlaneStats(core.std.Expr([src, pas], 'x y - abs'))
+              assert d.get_frame(0).props['PlaneStatsMax'] == 0.0, fmt
+          try:
+              core.hlgef.HDRAGCNext(core.std.BlankClip(format=vs.RGB24)).get_frame(0)
+              raise SystemExit('RGB24 NOT rejected')
+          except Exception:
+              pass
+          print('PASS: VS smoke test (windows, static dll)')
+          PY
+
+      - name: Upload dual-interface artifact
         uses: actions/upload-artifact@v4
         with:
           name: hdragc-next-windows-x64
