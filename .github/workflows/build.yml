@@ -105,7 +105,7 @@ jobs:
       - name: VapourSynth runtime smoke test
         run: |
           pip install vapoursynth
-          python - <<'PY'
+          @'
           import vapoursynth as vs
           core = vs.core
           core.std.LoadPlugin(path='pbuild/Release/hdragc_next.dll')
@@ -121,7 +121,7 @@ jobs:
           except Exception:
               pass
           print('PASS: VS smoke test (windows, static dll)')
-          PY
+          '@ | python -
 
       - name: Upload dual-interface artifact
         uses: actions/upload-artifact@v4
