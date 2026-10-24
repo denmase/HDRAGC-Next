@@ -163,7 +163,11 @@ static void VS_CC hlgefCreate(const VSMap* in, VSMap* out, void*, VSCore* core, 
 
 } // namespace
 
-#define HLGEF_VS_EXPORT extern "C" __declspec(dllexport)
+#if defined(_MSC_VER)
+  #define HLGEF_VS_EXPORT extern "C" __declspec(dllexport)
+#else
+  #define HLGEF_VS_EXPORT extern "C" __attribute__((visibility("default")))
+#endif
 HLGEF_VS_EXPORT void VS_CC VapourSynthPluginInit2(VSPlugin* plugin, const VSPLUGINAPI* vspapi)
 {
     vspapi->configPlugin("com.hdragc.next", "hlgef", "HDRAGC-Next",
