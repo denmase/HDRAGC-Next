@@ -85,11 +85,20 @@ jobs:
           cmake --build pbuild --config Release
 
       - name: Verify static dependencies (no vcruntime/msvcp/libstdc++)
+        shell: pwsh
         run: |
           $dll = "pbuild/Release/hdragc_next.dll"
-          $deps = (& "$env:VSAPPIDDIR\..\..\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64\dumpbin.exe" /dependents $dll) -join " "
+          if (Get-Command objdump -ErrorAction SilentlyContinue) {
+            $deps = (objdump -p $dll | Select-String "DLL Name") -join " "
+          } else {
+            $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            $dumpbin = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+            $deps = (& $dumpbin /dependents $dll) -join " "
+          }
+          Write-Output "Dependencies: $deps"
           if ($deps -match "vcruntime140|msvcp140|libstdc\+\+|libgcc") {
-            Write-Error "Non-static dependency found: $deps"; exit 1
+            Write-Error "Non-static dependency detected"
+            exit 1
           }
           Write-Output "Static deps OK"
 
