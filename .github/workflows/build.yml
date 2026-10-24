@@ -90,17 +90,21 @@ jobs:
           $dll = "pbuild/Release/hdragc_next.dll"
           if (Get-Command objdump -ErrorAction SilentlyContinue) {
             $deps = (objdump -p $dll | Select-String "DLL Name") -join " "
+            $exp  = (objdump -p $dll | Select-String "AvisynthPluginInit|VapourSynthPluginInit") -join " "
           } else {
             $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
             $dumpbin = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
             $deps = (& $dumpbin /dependents $dll) -join " "
+            $exp  = (& $dumpbin /exports $dll | Select-String "AvisynthPluginInit|VapourSynthPluginInit") -join " "
           }
           Write-Output "Dependencies: $deps"
           if ($deps -match "vcruntime140|msvcp140|libstdc\+\+|libgcc") {
-            Write-Error "Non-static dependency detected"
-            exit 1
+            Write-Error "Non-static dependency detected"; exit 1
           }
-          Write-Output "Static deps OK"
+          if ($exp -notmatch "VapourSynthPluginInit2" -or $exp -notmatch "AvisynthPluginInit3") {
+            Write-Error "Entry points missing: $exp"; exit 1
+          }
+          Write-Output "Entry points OK: $exp"
 
       - name: VapourSynth runtime smoke test
         run: |
